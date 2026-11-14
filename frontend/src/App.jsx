@@ -27,6 +27,8 @@ function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('orbit.theme') || 'light')
   const [isDragging, setIsDragging] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState([])
+  const [showFileConfirm, setShowFileConfirm] = useState(false)
   const inputRef = useRef(null)
   const folderInputRef = useRef(null)
   const result = snapshot?.result
@@ -55,6 +57,48 @@ function App() {
     finally { clearInterval(timer); setBusy(false); setTimeout(() => setProgress(0), 900) }
   }
 
+  function confirmFiles(files) {
+    const selected = [...(files || [])]
+    if (!selected.length) return
+    setPendingFiles(selected)
+    setShowFileConfirm(true)
+  }
+
+  async function chooseFolder() {
+    // The webkitdirectory input makes Chromium show its "Upload N files?"
+    // security prompt. The File System Access picker avoids that upload flow;
+    // files are still read locally and go through our own confirmation modal.
+    if (window.showDirectoryPicker) {
+      try {
+        const directory = await window.showDirectoryPicker()
+        const selected = []
+        async function collect(handle, parentPath = '') {
+          for await (const entry of handle.values()) {
+            const path = parentPath ? `${parentPath}/${entry.name}` : entry.name
+            if (entry.kind === 'directory') await collect(entry, path)
+            else {
+              const file = await entry.getFile()
+              selected.push({ name: file.name, webkitRelativePath: path, text: () => file.text() })
+            }
+          }
+        }
+        await collect(directory)
+        confirmFiles(selected)
+      } catch (cause) {
+        if (cause.name !== 'AbortError') setError(cause.message || 'Could not read that folder.')
+      }
+      return
+    }
+    folderInputRef.current?.click()
+  }
+
+  function beginUpload() {
+    const selected = pendingFiles
+    setPendingFiles([])
+    setShowFileConfirm(false)
+    upload(selected)
+  }
+
   function clearData() {
     localStorage.removeItem(STORAGE_KEY); setSnapshot(null); setError(''); setNotice('Local snapshot erased.'); setShowHistory(false)
   }
@@ -77,7 +121,7 @@ function App() {
       {notice && <div className="alert alert-success"><Check size={16}/><span>{notice}</span><button onClick={() => setNotice('')}><X size={15}/></button></div>}
       {busy && <div className="progress-card"><div className="progress-heading"><span><span className="spinner"/> Reading your export locally</span><strong>{progress}%</strong></div><div className="progress-track"><div className="progress-fill" style={{width: `${progress}%`}}/></div><small>Your data never leaves this browser.</small></div>}
 
-      {!result ? <section className={`upload-card ${isDragging ? 'drag-active' : ''}`} onDragEnter={event => {event.preventDefault(); setIsDragging(true)}} onDragOver={event => event.preventDefault()} onDragLeave={event => {if (!event.currentTarget.contains(event.relatedTarget)) setIsDragging(false)}} onDrop={event => {event.preventDefault(); setIsDragging(false); upload(event.dataTransfer.files)}}><div className="upload-orbit orbit-one"/><div className="upload-orbit orbit-two"/><div className="upload-illustration"><FileArchive size={25}/><span className="file-chip"><FileJson2 size={14}/></span></div><h2>{isDragging ? 'Drop your export here' : 'Start with your Instagram export'}</h2><p>Drop your ZIP or JSON files here, or choose your original ZIP, follower and following files, or exported folder.</p><div className="upload-options"><button className="button button-primary" onClick={() => inputRef.current?.click()}><Upload size={15}/> Choose files</button><button className="button button-export" onClick={() => folderInputRef.current?.click()}><FileJson2 size={15}/> Choose folder</button></div><div className="accepted-files"><span><Check size={12}/> ZIP export</span><span><Check size={12}/> JSON files</span><span><Check size={12}/> Folder</span></div><div className="where-hint">Find your export under <b>connections/follower-and-following</b>.</div></section> : <>
+      {!result ? <section className={`upload-card ${isDragging ? 'drag-active' : ''}`} onDragEnter={event => {event.preventDefault(); setIsDragging(true)}} onDragOver={event => event.preventDefault()} onDragLeave={event => {if (!event.currentTarget.contains(event.relatedTarget)) setIsDragging(false)}} onDrop={event => {event.preventDefault(); setIsDragging(false); confirmFiles(event.dataTransfer.files)}}><div className="upload-orbit orbit-one"/><div className="upload-orbit orbit-two"/><div className="upload-illustration"><FileArchive size={25}/><span className="file-chip"><FileJson2 size={14}/></span></div><h2>{isDragging ? 'Drop your export here' : 'Start with your Instagram export'}</h2><p>Drop your ZIP or JSON files here, or choose your original ZIP, follower and following files, or exported folder.</p><div className="upload-options"><button className="button button-primary" onClick={() => inputRef.current?.click()}><Upload size={15}/> Choose files</button><button className="button button-export" onClick={chooseFolder}><FileJson2 size={15}/> Choose folder</button></div><div className="accepted-files"><span><Check size={12}/> ZIP export</span><span><Check size={12}/> JSON files</span><span><Check size={12}/> Folder</span></div><div className="where-hint">Find your export under <b>connections/follower-and-following</b>.</div></section> : <>
         <div className="snapshot-strip"><div className="snapshot-left"><span className="snapshot-icon"><Check size={14}/></span><div><strong>Snapshot updated</strong><span>Last uploaded {shownDate} <span className="bullet">·</span> Comparison is based on this export</span></div></div><div className="snapshot-right"><span className="ratio-label">FOLLOWER / FOLLOWING RATIO <b>{ratio}</b></span><button className="text-button" onClick={() => setShowHistory(value => !value)}><Clock3 size={14}/> {showHistory ? 'Hide history' : 'View history'}</button></div></div>
         {showHistory && <section className="history-card"><div className="section-heading"><div><span className="section-kicker">SNAPSHOT COMPARISON</span><h2>What changed</h2></div><span className="history-note">Compared with your previous upload</span></div>{history ? <div className="history-grid">{[{key:'newFollowers',label:'New followers',icon:ArrowDownLeft,color:'green'},{key:'lostFollowers',label:'Lost followers',icon:ArrowUpRight,color:'rose'},{key:'newFollowing',label:'New following',icon:ArrowUpRight,color:'violet'},{key:'unfollowedAccounts',label:'Unfollowed accounts',icon:ArrowDownLeft,color:'orange'}].map(item => <div className="history-item" key={item.key}><div className={`history-icon ${item.color}`}><item.icon size={15}/></div><div><span>{item.label}</span><strong>{history[item.key].length}</strong><small>{history[item.key].length ? history[item.key].slice(0,3).map(name => `@${name}`).join(', ') : 'No changes'}</small></div></div>)}</div> : <div className="history-empty"><Clock3 size={16}/> Upload another export to compare snapshots. These changes reflect the time between exports.</div>}</section>}
         <section className="validation-strip"><div><Check size={14}/><b>Export validated</b><span>{snapshot.diagnostics?.followerFilesDetected || 0} follower file(s) detected</span></div><div><Users size={14}/><b>{result.followers.length.toLocaleString()}</b><span>unique followers</span></div><div><Activity size={14}/><b>{result.following.length.toLocaleString()}</b><span>unique following</span></div><div><FileJson2 size={14}/><b>{snapshot.diagnostics?.filesIgnored?.length || 0}</b><span>files ignored</span></div><div className={snapshot.diagnostics?.parsingErrors?.length ? 'has-errors' : ''}><CircleHelp size={14}/><b>{snapshot.diagnostics?.parsingErrors?.length || 0}</b><span>parsing errors</span></div></section>
@@ -87,7 +131,7 @@ function App() {
         <section className="list-panel"><div className="list-header"><div><div className="section-kicker">YOUR CONNECTIONS</div><h2>Account breakdown</h2><p>Explore how your circles overlap.</p></div><div className="list-controls"><label className="search-box"><Search size={16}/><input aria-label="Search usernames" placeholder="Search usernames…" value={query} onChange={event => setQuery(event.target.value)}/>{query && <button onClick={() => setQuery('')} aria-label="Clear search"><X size={14}/></button>}</label><button className="button button-export" onClick={() => exportCSV(activeTab, result[activeTab])}><Download size={15}/> Export CSV</button></div></div>
           <div className="tabs" role="tablist">{tabs.map(item => <button role="tab" aria-selected={activeTab === item.id} className={`tab ${activeTab === item.id ? 'is-active' : ''}`} key={item.id} onClick={() => {setActiveTab(item.id); setQuery(''); setPage(0)}}><item.icon size={15}/>{item.label}<span className="tab-count">{result[item.id].length.toLocaleString()}</span></button>)}</div>
           <div className="list-meta"><span>{tab.label} <b>{result[activeTab].length.toLocaleString()}</b></span><span>Sorted alphabetically <ChevronDown size={13}/></span></div>
-          {filtered.length ? <TableContainer component={Paper} elevation={0} className="mui-table-wrap"><Table size="small" aria-label={`${tab.label} accounts`}><TableHead><TableRow><TableCell>ACCOUNT</TableCell><TableCell>USERNAME</TableCell><TableCell>RELATIONSHIP</TableCell></TableRow></TableHead><TableBody>{pageRows.map((username, index) => <TableRow key={username} hover><TableCell><span className={`avatar avatar-${(page * rowsPerPage + index) % 5}`}>{username.slice(0,1).toUpperCase()}</span></TableCell><TableCell><span className="account-handle">@{username}</span></TableCell><TableCell><span className="account-state"><span className="state-dot"/> Instagram account</span></TableCell></TableRow>)}</TableBody></Table><TablePagination component="div" count={filtered.length} page={Math.min(page, Math.max(0, Math.ceil(filtered.length / rowsPerPage) - 1))} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={event => {setRowsPerPage(parseInt(event.target.value, 10)); setPage(0)}} rowsPerPageOptions={[10,20,50,100]} labelRowsPerPage="Rows:"/></TableContainer> : <div className="empty-list"><div className="empty-icon"><Search size={19}/></div><strong>{query ? 'No usernames found' : `No ${tab.label.toLowerCase()}`}</strong><span>{query ? 'Try another search term.' : 'This list is empty in your current snapshot.'}</span></div>}
+          {filtered.length ? <TableContainer component={Paper} elevation={0} className="mui-table-wrap"><Table size="small" aria-label={`${tab.label} accounts`}><TableHead><TableRow><TableCell>#</TableCell><TableCell>ACCOUNT</TableCell><TableCell>USERNAME</TableCell><TableCell>RELATIONSHIP</TableCell></TableRow></TableHead><TableBody>{pageRows.map((username, index) => <TableRow key={username} hover><TableCell>{page * rowsPerPage + index + 1}</TableCell><TableCell><span className={`avatar avatar-${(page * rowsPerPage + index) % 5}`}>{username.slice(0,1).toUpperCase()}</span></TableCell><TableCell><span className="account-handle">@{username}</span></TableCell><TableCell><span className="account-state"><span className="state-dot"/> Instagram account</span></TableCell></TableRow>)}</TableBody></Table><TablePagination component="div" count={filtered.length} page={Math.min(page, Math.max(0, Math.ceil(filtered.length / rowsPerPage) - 1))} onPageChange={(_, nextPage) => setPage(nextPage)} rowsPerPage={rowsPerPage} onRowsPerPageChange={event => {setRowsPerPage(parseInt(event.target.value, 10)); setPage(0)}} rowsPerPageOptions={[10,20,50,100]} labelRowsPerPage="Rows:"/></TableContainer> : <div className="empty-list"><div className="empty-icon"><Search size={19}/></div><strong>{query ? 'No usernames found' : `No ${tab.label.toLowerCase()}`}</strong><span>{query ? 'Try another search term.' : 'This list is empty in your current snapshot.'}</span></div>}
           <div className="list-footer"><span>Showing <b>{filtered.length ? page * rowsPerPage + 1 : 0}–{Math.min((page + 1) * rowsPerPage, filtered.length)}</b> of <b>{filtered.length}</b> filtered accounts</span><span><ShieldCheck size={13}/> Private on this device</span></div>
         </section>
         <div className="data-actions"><span>Manage your saved snapshot</span><button onClick={clearData}><Trash2 size={14}/> Erase local data</button></div>
@@ -95,11 +139,13 @@ function App() {
       <footer className="main-footer"><span>ORBIT <span className="brand-dot">·</span> PERSONAL FOLLOWER TRACKER</span><span><LockKeyhole size={12}/> No login. No tracking. Just your data.</span></footer>
       </div>
     </main>
-    <input ref={inputRef} className="hidden-input" type="file" accept=".zip,.json,application/json,application/zip" multiple onChange={event => {upload(event.target.files); event.target.value = ''}}/>
-    <input ref={folderInputRef} className="hidden-input" type="file" webkitdirectory="" directory="" multiple onChange={event => {upload(event.target.files); event.target.value = ''}}/>
+    <input ref={inputRef} className="hidden-input" type="file" accept=".zip,.json,application/json,application/zip" multiple onChange={event => {confirmFiles(event.target.files); event.target.value = ''}}/>
+    <input ref={folderInputRef} className="hidden-input" type="file" webkitdirectory="" directory="" multiple onChange={event => {confirmFiles(event.target.files); event.target.value = ''}}/>
+    {showFileConfirm && <div className="modal-backdrop" role="presentation"><section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="file-confirm-title"><div className="modal-check"><FileUp size={21}/></div><h2 id="file-confirm-title">Upload {pendingFiles.length} {pendingFiles.length === 1 ? 'file' : 'files'}?</h2><p>Your selected Instagram export will be processed in this browser. No files are sent to a backend.</p><div className="modal-actions"><button className="button button-export" onClick={() => {setShowFileConfirm(false); setPendingFiles([])}}>Cancel</button><button className="button button-primary" onClick={beginUpload}>Upload</button></div></section></div>}
     {showUploadModal && <div className="modal-backdrop" role="presentation"><section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title"><div className="modal-check"><Check size={22}/></div><h2 id="upload-modal-title">Export uploaded</h2><p>Your Instagram data was processed on this device. Your lists are now up to date.</p><button className="button button-primary modal-ok" onClick={() => setShowUploadModal(false)}>OK</button></section></div>}
   </div>
 }
 
 export default App
+
 
