@@ -41,14 +41,14 @@ npm run preview
 
 ## Deploy with GitHub Pages
 
-The GitHub Actions workflow builds and deploys the app whenever changes are pushed to the `Main` branch. To enable it the first time:
+The GitHub Actions workflow builds and deploys the app whenever changes are pushed to `Main` or `main` (both spellings are accepted during a branch rename). To enable it the first time:
 
 1. Push this repository, including `.github/workflows/deploy.yml`, to GitHub.
 2. In the repository on GitHub, open **Settings → Pages**.
 3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
 4. Open the **Actions** tab and wait for the **Deploy to GitHub Pages** workflow to complete.
 
-The app will be available at <https://parveen-2006.github.io/FollowCheck/>. Future pushes to `Main` automatically publish updates, usually within a few minutes. The Instagram export continues to be processed only in each visitor's browser.
+The app will be available at <https://parveen-2006.github.io/FollowCheck/>. Future pushes to either branch automatically publish updates, usually within a few minutes. The Instagram export continues to be processed only in each visitor's browser.
 
 ## Get your Instagram export
 
